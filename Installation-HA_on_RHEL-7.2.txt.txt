@@ -1,0 +1,429 @@
+RHEL 7 HIGH AVAILABILITY CLUSTER INSTALLATION AND CONFIGURATION GUIDE
+====================================================================
+
+This document provides a complete step-by-step procedure to install and
+configure a two-node High Availability (HA) Cluster on RHEL 7 using:
+
+- PCS (Pacemaker Configuration System)
+- Pacemaker
+- Corosync
+- GFS2
+- Resilient Storage Add-ons
+
+====================================================================
+CLUSTER COMPONENTS OVERVIEW
+====================================================================
+
+PCS              : Cluster management utility
+Pacemaker        : Cluster resource manager
+Corosync         : Cluster communication layer
+Fence Agents     : Node fencing and isolation
+GFS2             : Shared clustered filesystem
+PCSD             : Web UI and backend cluster daemon
+
+====================================================================
+LAB ENVIRONMENT
+====================================================================
+
+Node1    : rhcl-node1    : 192.168.29.79
+Node2    : rhcl-node2    : 192.168.29.131
+
+====================================================================
+PREREQUISITES
+====================================================================
+
+- Two RHEL 7 servers installed
+- Minimum 2 GB RAM per node
+- Root or sudo access
+- Network connectivity between nodes
+- RHEL 7 DVD ISO attached
+- Shared storage (optional for GFS2 setup)
+
+====================================================================
+ARCHITECTURE
+====================================================================
+
++-------------------+       Cluster Communication      +-------------------+
+|   rhcl-node1      | <------------------------------> |   rhcl-node2      |
+| 192.168.29.79     |                                  | 192.168.29.131    |
++-------------------+                                  +-------------------+
+
+====================================================================
+STEP 1 : CONFIGURE HOSTNAME
+====================================================================
+
+Configure hostname on Node1:
+
+# hostnamectl set-hostname rhcl-node1
+
+Verify:
+
+# hostnamectl
+
+------------------------------------------------------------
+
+Configure hostname on Node2:
+
+# hostnamectl set-hostname rhcl-node2
+
+Verify:
+
+# hostnamectl
+
+====================================================================
+STEP 2 : CONFIGURE HOST RESOLUTION
+====================================================================
+
+Update /etc/hosts on BOTH nodes:
+
+# vi /etc/hosts
+
+Add:
+
+192.168.29.79   rhcl-node1.localdomain   rhcl-node1
+192.168.29.131  rhcl-node2.localdomain   rhcl-node2
+
+====================================================================
+STEP 3 : VERIFY NETWORK CONNECTIVITY
+====================================================================
+
+From Node1:
+
+# ping rhcl-node2
+
+From Node2:
+
+# ping rhcl-node1
+
+====================================================================
+STEP 4 : MOUNT RHEL 7 DVD ISO
+====================================================================
+
+Create mount point:
+
+# mkdir -p /mnt/cdrom
+
+Mount DVD:
+
+# mount /dev/sr0 /mnt/cdrom
+
+Verify:
+
+# df -h
+
+====================================================================
+STEP 5 : VERIFY HA AND RESILIENT STORAGE REPOSITORIES
+====================================================================
+
+# cd /mnt/cdrom/addons
+# ls
+
+Expected output:
+
+HighAvailability  ResilientStorage
+
+====================================================================
+STEP 6 : CONFIGURE LOCAL YUM REPOSITORY
+====================================================================
+
+Create repository file:
+
+# vi /etc/yum.repos.d/my_local_repo.repo
+
+Add below content:
+
+------------------------------------------------------------
+
+[my_local_repo]
+name=my local repository
+baseurl=file:///mnt/cdrom
+enabled=1
+gpgcheck=0
+
+[rhel7-ha]
+name=RHEL7 HighAvailability
+baseurl=file:///mnt/cdrom/addons/HighAvailability
+enabled=1
+gpgcheck=0
+
+[rhel7-rs]
+name=RHEL7 ResilientStorage
+baseurl=file:///mnt/cdrom/addons/ResilientStorage
+enabled=1
+gpgcheck=0
+
+------------------------------------------------------------
+
+====================================================================
+STEP 7 : CLEAN YUM CACHE
+====================================================================
+
+# yum clean all
+# rm -rf /var/cache/yum
+
+====================================================================
+STEP 8 : VERIFY REPOSITORIES
+====================================================================
+
+# yum repolist
+
+Expected output:
+
+repo id            repo name                    status
+my_local_repo      my local repository          4620
+rhel7-ha           RHEL7 HighAvailability       30
+rhel7-rs           RHEL7 ResilientStorage       37
+
+====================================================================
+STEP 9 : INSTALL HA CLUSTER PACKAGES
+====================================================================
+
+Run on BOTH nodes:
+
+# yum install pcs pacemaker fence-agents lvm2-cluster \
+resource-agents psmisc policycoreutils-python \
+gfs2-utils -y
+
+====================================================================
+STEP 10 : CONFIGURE hacluster USER
+====================================================================
+
+Set password on BOTH nodes:
+
+# passwd hacluster
+
+Important:
+- Use same password on both nodes
+- Configure password never to expire
+
+Set password never expire:
+
+# chage -M -1 hacluster
+
+Verify:
+
+# chage -l hacluster
+
+====================================================================
+STEP 11 : START PCS DAEMON
+====================================================================
+
+On Node1:
+
+# systemctl start pcsd.service
+# systemctl enable pcsd.service
+# systemctl status pcsd.service
+
+------------------------------------------------------------
+
+On Node2:
+
+# systemctl start pcsd.service
+# systemctl enable pcsd.service
+# systemctl status pcsd.service
+
+====================================================================
+STEP 12 : CONFIGURE FIREWALL
+====================================================================
+
+Allow HA services:
+
+# firewall-cmd --permanent --add-service=high-availability
+# firewall-cmd --reload
+
+Verify:
+
+# firewall-cmd --list-all
+
+====================================================================
+STEP 13 : AUTHENTICATE CLUSTER NODES
+====================================================================
+
+Run from any one node:
+
+# pcs cluster auth rhcl-node1 rhcl-node2 -u hacluster
+
+Enter password when prompted.
+
+Expected output:
+
+rhcl-node1: Authorized
+rhcl-node2: Authorized
+
+====================================================================
+STEP 14 : CREATE CLUSTER
+====================================================================
+
+Create cluster named DevCluster:
+
+# pcs cluster setup --start --name DevCluster \
+rhcl-node1 rhcl-node2
+
+====================================================================
+STEP 15 : ENABLE CLUSTER SERVICES
+====================================================================
+
+# pcs cluster enable --all
+
+====================================================================
+STEP 16 : VERIFY CLUSTER STATUS
+====================================================================
+
+# pcs status
+
+Expected output:
+
+Cluster name: DevCluster
+Stack: corosync
+Current DC: rhcl-node1
+2 nodes configured
+
+====================================================================
+STEP 17 : VERIFY COROSYNC AND PACEMAKER SERVICES
+====================================================================
+
+# systemctl status corosync
+# systemctl status pacemaker
+
+====================================================================
+STEP 18 : CHECK CLUSTER CONFIGURATION
+====================================================================
+
+# pcs config
+
+====================================================================
+STEP 19 : ACCESS PCS WEB INTERFACE
+====================================================================
+
+Access URL:
+
+https://<IP-ADDRESS>:2224
+
+Examples:
+
+https://192.168.29.79:2224
+https://192.168.29.131:2224
+
+Login Credentials:
+
+Username : hacluster
+Password : <configured-password>
+
+====================================================================
+USEFUL CLUSTER COMMANDS
+====================================================================
+
+Check cluster status:
+
+# pcs status
+
+------------------------------------------------------------
+
+Start cluster:
+
+# pcs cluster start --all
+
+------------------------------------------------------------
+
+Stop cluster:
+
+# pcs cluster stop --all
+
+------------------------------------------------------------
+
+Enable cluster at boot:
+
+# pcs cluster enable --all
+
+------------------------------------------------------------
+
+Disable cluster at boot:
+
+# pcs cluster disable --all
+
+------------------------------------------------------------
+
+Check Corosync status:
+
+# corosync-cfgtool -s
+
+------------------------------------------------------------
+
+Check quorum status:
+
+# pcs quorum status
+
+====================================================================
+CLUSTER SERVICE PORTS
+====================================================================
+
+PCS Web UI        : 2224
+Corosync          : 5405
+Pacemaker Remote  : 3121
+
+====================================================================
+COMMON TROUBLESHOOTING
+====================================================================
+
+Check system logs:
+
+# journalctl -xe
+
+------------------------------------------------------------
+
+Check PCS logs:
+
+# journalctl -u pcsd
+
+------------------------------------------------------------
+
+Restart cluster services:
+
+# systemctl restart pcsd
+# systemctl restart corosync
+# systemctl restart pacemaker
+
+------------------------------------------------------------
+
+Verify hostname resolution:
+
+# ping rhcl-node1
+# ping rhcl-node2
+
+------------------------------------------------------------
+
+Verify open ports:
+
+# ss -tulpn
+
+====================================================================
+SECURITY RECOMMENDATIONS
+====================================================================
+
+- Configure fencing (STONITH) in production
+- Use dedicated heartbeat network
+- Configure quorum properly
+- Secure PCS web interface
+- Configure SELinux policies
+- Use shared storage redundancy
+
+====================================================================
+NEXT STEPS
+====================================================================
+
+- Configure shared storage
+- Configure fencing devices
+- Create cluster resources
+- Configure failover services
+- Setup GFS2 filesystem
+- Configure virtual IP failover
+- Configure application resources
+
+====================================================================
+AUTHOR
+====================================================================
+
+Abdul Rehan
+
+GitHub Repository:
+https://github.com/rehanadm/Linux-HA-Cluster

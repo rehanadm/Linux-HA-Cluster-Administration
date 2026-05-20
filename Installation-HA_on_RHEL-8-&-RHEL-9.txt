@@ -1,0 +1,452 @@
+RHEL 8 / RHEL 9 HIGH AVAILABILITY CLUSTER INSTALLATION GUIDE
+=============================================================
+
+This document provides step-by-step instructions to install and
+configure a two-node High Availability (HA) Cluster on:
+
+- RHEL 8
+- RHEL 9
+- Rocky Linux 8/9
+- AlmaLinux 8/9
+- Oracle Linux 8/9
+
+using:
+
+- PCS
+- Pacemaker
+- Corosync
+- Fence Agents
+- GFS2
+
+=============================================================
+CLUSTER COMPONENTS
+=============================================================
+
+PCS              : Cluster management utility
+Pacemaker        : Resource manager
+Corosync         : Cluster communication
+Fence Agents     : Node fencing
+GFS2             : Shared clustered filesystem
+PCSD             : Web-based cluster management
+
+=============================================================
+LAB ENVIRONMENT
+=============================================================
+
+Node1    : rhcl-node1    : 192.168.29.79
+Node2    : rhcl-node2    : 192.168.29.131
+
+=============================================================
+PREREQUISITES
+=============================================================
+
+- Two RHEL 8/9 servers
+- Root or sudo access
+- Network connectivity between nodes
+- Minimum 2 GB RAM
+- Shared storage (optional for GFS2)
+- RHEL DVD ISO or Internet connectivity
+
+=============================================================
+STEP 1 : CONFIGURE HOSTNAME
+=============================================================
+
+Configure hostname on Node1:
+
+# hostnamectl set-hostname rhcl-node1
+
+-------------------------------------------------------------
+
+Configure hostname on Node2:
+
+# hostnamectl set-hostname rhcl-node2
+
+Verify:
+
+# hostnamectl
+
+=============================================================
+STEP 2 : CONFIGURE HOST RESOLUTION
+=============================================================
+
+Update /etc/hosts on BOTH nodes:
+
+# vi /etc/hosts
+
+Add:
+
+192.168.29.79   rhcl-node1.localdomain   rhcl-node1
+192.168.29.131  rhcl-node2.localdomain   rhcl-node2
+
+=============================================================
+STEP 3 : VERIFY CONNECTIVITY
+=============================================================
+
+From Node1:
+
+# ping rhcl-node2
+
+From Node2:
+
+# ping rhcl-node1
+
+=============================================================
+STEP 4 : CONFIGURE REPOSITORY
+=============================================================
+
+OPTION 1 : USING INTERNET REPOSITORY
+-------------------------------------------------------------
+
+Enable HA repository.
+
+RHEL 8:
+
+# subscription-manager repos \
+--enable=rhel-8-for-x86_64-highavailability-rpms
+
+-------------------------------------------------------------
+
+RHEL 9:
+
+# subscription-manager repos \
+--enable=rhel-9-for-x86_64-highavailability-rpms
+
+=============================================================
+OPTION 2 : USING LOCAL DVD ISO REPOSITORY
+=============================================================
+
+Create mount point:
+
+# mkdir -p /mnt/cdrom
+
+-------------------------------------------------------------
+
+Mount ISO:
+
+# mount /dev/sr0 /mnt/cdrom
+
+Verify:
+
+# df -h
+
+-------------------------------------------------------------
+
+Verify repository directories:
+
+# cd /mnt/cdrom
+# ls
+
+Expected directories:
+
+BaseOS
+AppStream
+
+=============================================================
+CONFIGURE LOCAL REPOSITORY FILE
+=============================================================
+
+# vi /etc/yum.repos.d/rhel8-9.repo
+
+Example for RHEL 8:
+
+-------------------------------------------------------------
+
+[rhel8-baseos]
+name=RHEL8 BaseOS
+baseurl=file:///mnt/cdrom/BaseOS
+enabled=1
+gpgcheck=0
+
+[rhel8-appstream]
+name=RHEL8 AppStream
+baseurl=file:///mnt/cdrom/AppStream
+enabled=1
+gpgcheck=0
+
+-------------------------------------------------------------
+
+Example for RHEL 9:
+
+-------------------------------------------------------------
+
+[rhel9-baseos]
+name=RHEL9 BaseOS
+baseurl=file:///mnt/cdrom/BaseOS
+enabled=1
+gpgcheck=0
+
+[rhel9-appstream]
+name=RHEL9 AppStream
+baseurl=file:///mnt/cdrom/AppStream
+enabled=1
+gpgcheck=0
+
+=============================================================
+STEP 5 : CLEAN REPOSITORY CACHE
+=============================================================
+
+# dnf clean all
+# rm -rf /var/cache/dnf
+
+Verify repositories:
+
+# dnf repolist
+
+=============================================================
+STEP 6 : INSTALL HA PACKAGES
+=============================================================
+
+Run on BOTH nodes.
+
+RHEL 8:
+
+# dnf install pcs pacemaker fence-agents-all \
+resource-agents lvm2-lockd gfs2-utils dlm -y
+
+-------------------------------------------------------------
+
+RHEL 9:
+
+# dnf install pcs pacemaker fence-agents-all \
+resource-agents lvm2-lockd gfs2-utils dlm-controld -y
+
+=============================================================
+STEP 7 : CONFIGURE hacluster USER
+=============================================================
+
+Set password:
+
+# passwd hacluster
+
+Use SAME password on BOTH nodes.
+
+-------------------------------------------------------------
+
+Configure password never to expire:
+
+# chage -M -1 hacluster
+
+Verify:
+
+# chage -l hacluster
+
+=============================================================
+STEP 8 : START PCS SERVICE
+=============================================================
+
+Run on BOTH nodes.
+
+# systemctl enable pcsd
+# systemctl start pcsd
+# systemctl status pcsd
+
+=============================================================
+STEP 9 : CONFIGURE FIREWALL
+=============================================================
+
+Allow HA services:
+
+# firewall-cmd --permanent --add-service=high-availability
+# firewall-cmd --reload
+
+Verify:
+
+# firewall-cmd --list-all
+
+=============================================================
+STEP 10 : AUTHENTICATE CLUSTER NODES
+=============================================================
+
+Run from any one node:
+
+# pcs host auth rhcl-node1 rhcl-node2 -u hacluster
+
+Expected output:
+
+rhcl-node1: Authorized
+rhcl-node2: Authorized
+
+=============================================================
+STEP 11 : CREATE CLUSTER
+=============================================================
+
+Create cluster named DevCluster:
+
+# pcs cluster setup DevCluster rhcl-node1 rhcl-node2
+
+-------------------------------------------------------------
+
+Start cluster:
+
+# pcs cluster start --all
+
+-------------------------------------------------------------
+
+Enable cluster at boot:
+
+# pcs cluster enable --all
+
+=============================================================
+STEP 12 : VERIFY CLUSTER STATUS
+=============================================================
+
+# pcs status
+
+Expected output:
+
+Cluster name: DevCluster
+Cluster Summary:
+  * Stack: corosync
+  * Current DC: rhcl-node1
+  * 2 nodes configured
+
+=============================================================
+STEP 13 : VERIFY CLUSTER SERVICES
+=============================================================
+
+# systemctl status corosync
+# systemctl status pacemaker
+
+=============================================================
+STEP 14 : CHECK QUORUM
+=============================================================
+
+# pcs quorum status
+
+=============================================================
+STEP 15 : ACCESS PCS WEB INTERFACE
+=============================================================
+
+Access URL:
+
+https://<node-ip>:2224
+
+Examples:
+
+https://192.168.29.79:2224
+https://192.168.29.131:2224
+
+-------------------------------------------------------------
+
+Login Credentials:
+
+Username : hacluster
+Password : <configured-password>
+
+=============================================================
+USEFUL CLUSTER COMMANDS
+=============================================================
+
+Check cluster status:
+
+# pcs status
+
+-------------------------------------------------------------
+
+View full cluster configuration:
+
+# pcs config
+
+-------------------------------------------------------------
+
+Start cluster:
+
+# pcs cluster start --all
+
+-------------------------------------------------------------
+
+Stop cluster:
+
+# pcs cluster stop --all
+
+-------------------------------------------------------------
+
+Restart cluster:
+
+# pcs cluster restart --all
+
+-------------------------------------------------------------
+
+Check Corosync status:
+
+# corosync-cfgtool -s
+
+-------------------------------------------------------------
+
+Monitor cluster resources:
+
+# crm_mon
+
+=============================================================
+CLUSTER SERVICE PORTS
+=============================================================
+
+PCS Web UI        : 2224
+Corosync          : 5405
+Pacemaker Remote  : 3121
+
+=============================================================
+COMMON TROUBLESHOOTING
+=============================================================
+
+Check cluster logs:
+
+# journalctl -xe
+
+-------------------------------------------------------------
+
+Check PCS logs:
+
+# journalctl -u pcsd
+
+-------------------------------------------------------------
+
+Restart cluster services:
+
+# systemctl restart pcsd
+# systemctl restart corosync
+# systemctl restart pacemaker
+
+-------------------------------------------------------------
+
+Verify hostname resolution:
+
+# ping rhcl-node1
+# ping rhcl-node2
+
+-------------------------------------------------------------
+
+Verify open ports:
+
+# ss -tulpn
+
+=============================================================
+SECURITY RECOMMENDATIONS
+=============================================================
+
+- Configure fencing (STONITH) in production
+- Use dedicated heartbeat network
+- Configure quorum policies
+- Restrict PCS web access
+- Enable SELinux policies
+- Use shared storage redundancy
+
+=============================================================
+NEXT STEPS
+=============================================================
+
+- Configure shared storage
+- Configure GFS2 filesystem
+- Configure fencing devices
+- Configure virtual IP resources
+- Configure application failover
+- Configure clustered services
+
+=============================================================
+AUTHOR
+=============================================================
+
+Abdul Rehan
+
+GitHub Repository:
+https://github.com/rehanadm/Linux-HA-Cluster

@@ -1,0 +1,585 @@
+# Ubuntu Keepalived High Availability Configuration Guide
+
+This document provides a complete step-by-step guide to configure High Availability (HA) using Keepalived and Virtual IP (VIP) failover on Ubuntu servers.
+
+Supported versions:
+
+- Ubuntu 20.04 LTS
+- Ubuntu 22.04 LTS
+- Ubuntu 24.04 LTS
+
+The setup uses:
+
+- Keepalived
+- VRRP (Virtual Router Redundancy Protocol)
+- Floating Virtual IP (VIP)
+
+This configuration provides automatic failover between two Ubuntu servers.
+
+---
+
+# What is Keepalived?
+
+Keepalived is a Linux High Availability service that provides:
+
+- Virtual IP failover
+- Automatic failover
+- Redundancy
+- Health monitoring
+- High Availability networking
+
+Keepalived uses VRRP protocol to move a Virtual IP between servers during node failure.
+
+---
+
+# Architecture Overview
+
+```text
+                   CLIENT ACCESS
+                         |
+                         |
+                  Virtual IP (VIP)
+                    192.168.29.200
+                         |
+          ---------------------------------
+          |                               |
++-------------------+         +-------------------+
+|   MASTER NODE     |         |   BACKUP NODE     |
+| ubuntu-node1      |         | ubuntu-node2      |
+| 192.168.29.101    |         | 192.168.29.102    |
++-------------------+         +-------------------+
+
+Priority : 101                Priority : 100
+State    : MASTER             State    : BACKUP
+```
+
+---
+
+# Lab Environment
+
+| Node | Hostname | IP Address | Role |
+|---|---|---|---|
+| Node1 | ubuntu-node1 | 192.168.29.101 | MASTER |
+| Node2 | ubuntu-node2 | 192.168.29.102 | BACKUP |
+| VIP | Virtual IP | 192.168.29.200 | Floating IP |
+
+---
+
+# Prerequisites
+
+- Two Ubuntu servers
+- Root or sudo access
+- Network connectivity
+- Same subnet for both nodes
+- Firewall access
+- Static IP addresses configured
+
+---
+
+# Step 1 : Configure Hostname
+
+## Configure Node1
+
+```bash
+sudo hostnamectl set-hostname ubuntu-node1
+```
+
+---
+
+## Configure Node2
+
+```bash
+sudo hostnamectl set-hostname ubuntu-node2
+```
+
+Verify:
+
+```bash
+hostnamectl
+```
+
+---
+
+# Step 2 : Configure Host Resolution
+
+Update `/etc/hosts` on BOTH nodes.
+
+```bash
+sudo vi /etc/hosts
+```
+
+Add:
+
+```text
+192.168.29.101   ubuntu-node1
+192.168.29.102   ubuntu-node2
+```
+
+---
+
+# Step 3 : Verify Connectivity
+
+From Node1:
+
+```bash
+ping ubuntu-node2
+```
+
+From Node2:
+
+```bash
+ping ubuntu-node1
+```
+
+---
+
+# Step 4 : Update Ubuntu Packages
+
+Run on BOTH nodes.
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+```
+
+---
+
+# Step 5 : Install Keepalived
+
+Install Keepalived on BOTH nodes.
+
+```bash
+sudo apt install keepalived -y
+```
+
+Verify installation:
+
+```bash
+keepalived --version
+```
+
+---
+
+# Step 6 : Backup Existing Configuration
+
+```bash
+sudo cp /etc/keepalived/keepalived.conf \
+/etc/keepalived/keepalived.conf.bkp
+```
+
+---
+
+# Step 7 : Verify Network Interface
+
+Check network interface name.
+
+```bash
+ip addr
+```
+
+Common Ubuntu interface names:
+
+```text
+ens33
+ens160
+enp0s3
+eth0
+```
+
+Use correct interface name in configuration.
+
+---
+
+# Step 8 : Configure MASTER Node
+
+Edit configuration on Node1.
+
+```bash
+sudo vi /etc/keepalived/keepalived.conf
+```
+
+Add below configuration:
+
+```conf
+global_defs {
+   router_id UBUNTU_NODE1
+}
+
+vrrp_instance VI_1 {
+
+    state MASTER
+    interface ens33
+    virtual_router_id 51
+    priority 101
+    advert_int 1
+
+    authentication {
+        auth_type PASS
+        auth_pass UbuntuHA123
+    }
+
+    virtual_ipaddress {
+        192.168.29.200
+    }
+}
+```
+
+---
+
+# Configuration Explanation
+
+| Parameter | Description |
+|---|---|
+| state MASTER | Primary node |
+| interface | Network interface |
+| virtual_router_id | VRRP group identifier |
+| priority | Higher value becomes MASTER |
+| advert_int | VRRP advertisement interval |
+| auth_pass | Authentication password |
+| virtual_ipaddress | Floating Virtual IP |
+
+---
+
+# Step 9 : Configure BACKUP Node
+
+Edit configuration on Node2.
+
+```bash
+sudo vi /etc/keepalived/keepalived.conf
+```
+
+Add below configuration:
+
+```conf
+global_defs {
+   router_id UBUNTU_NODE2
+}
+
+vrrp_instance VI_1 {
+
+    state BACKUP
+    interface ens33
+    virtual_router_id 51
+    priority 100
+    advert_int 1
+
+    authentication {
+        auth_type PASS
+        auth_pass UbuntuHA123
+    }
+
+    virtual_ipaddress {
+        192.168.29.200
+    }
+}
+```
+
+---
+
+# Step 10 : Configure Firewall
+
+If UFW firewall is enabled, allow VRRP traffic.
+
+Check firewall status:
+
+```bash
+sudo ufw status
+```
+
+Allow Keepalived communication:
+
+```bash
+sudo ufw allow 112/proto vrrp
+```
+
+Reload firewall:
+
+```bash
+sudo ufw reload
+```
+
+---
+
+# Step 11 : Enable IP Forwarding (Optional)
+
+If using Keepalived with load balancing or routing:
+
+Edit sysctl configuration:
+
+```bash
+sudo vi /etc/sysctl.conf
+```
+
+Add:
+
+```text
+net.ipv4.ip_forward=1
+```
+
+Apply changes:
+
+```bash
+sudo sysctl -p
+```
+
+---
+
+# Step 12 : Start Keepalived Service
+
+Run on BOTH nodes.
+
+```bash
+sudo systemctl enable keepalived
+sudo systemctl start keepalived
+sudo systemctl status keepalived
+```
+
+---
+
+# Step 13 : Verify VIP Assignment
+
+Check VIP on MASTER node.
+
+```bash
+ip addr
+```
+
+Expected output:
+
+```text
+192.168.29.200
+```
+
+VIP should appear only on MASTER node.
+
+---
+
+# Step 14 : Verify Keepalived Logs
+
+Check service logs.
+
+```bash
+sudo journalctl -u keepalived
+```
+
+Real-time logs:
+
+```bash
+sudo journalctl -u keepalived -f
+```
+
+---
+
+# Step 15 : Test Failover
+
+Stop Keepalived service on MASTER node.
+
+```bash
+sudo systemctl stop keepalived
+```
+
+Verify VIP moved to BACKUP node.
+
+```bash
+ip addr
+```
+
+Expected:
+
+- VIP removed from MASTER
+- VIP assigned to BACKUP
+
+---
+
+# Step 16 : Restore MASTER Node
+
+Start Keepalived again.
+
+```bash
+sudo systemctl start keepalived
+```
+
+Because MASTER has higher priority, VIP returns automatically.
+
+---
+
+# Keepalived Service Commands
+
+## Start Service
+
+```bash
+sudo systemctl start keepalived
+```
+
+---
+
+## Stop Service
+
+```bash
+sudo systemctl stop keepalived
+```
+
+---
+
+## Restart Service
+
+```bash
+sudo systemctl restart keepalived
+```
+
+---
+
+## Enable at Boot
+
+```bash
+sudo systemctl enable keepalived
+```
+
+---
+
+## Check Status
+
+```bash
+sudo systemctl status keepalived
+```
+
+---
+
+# Useful Verification Commands
+
+## Verify VIP
+
+```bash
+ip addr
+```
+
+---
+
+## Verify Routing
+
+```bash
+ip route
+```
+
+---
+
+## Verify Listening Ports
+
+```bash
+ss -tulpn
+```
+
+---
+
+## Check Logs
+
+```bash
+journalctl -xe
+```
+
+---
+
+# Common Troubleshooting
+
+## VIP Not Moving
+
+Check service status:
+
+```bash
+sudo systemctl status keepalived
+```
+
+---
+
+## Incorrect Interface Name
+
+Verify interface:
+
+```bash
+ip addr
+```
+
+Update interface name correctly.
+
+---
+
+## Authentication Mismatch
+
+Ensure BOTH nodes use same:
+
+```text
+auth_pass
+```
+
+---
+
+## Firewall Blocking VRRP
+
+Allow VRRP protocol:
+
+```bash
+sudo ufw allow 112/proto vrrp
+```
+
+---
+
+# Security Recommendations
+
+- Use strong authentication password
+- Restrict firewall access
+- Use dedicated HA network
+- Monitor Keepalived logs
+- Configure service health checks
+
+---
+
+# Advanced Configuration
+
+Keepalived can monitor:
+
+- Nginx
+- Apache
+- MySQL
+- PostgreSQL
+- HAProxy
+- Custom scripts
+
+Example:
+
+```conf
+track_script {
+    chk_nginx
+}
+```
+
+---
+
+# Production Recommendations
+
+- Use minimum 3 nodes for enterprise HA
+- Configure monitoring tools
+- Use redundant network paths
+- Implement service monitoring
+- Configure proper backup strategies
+
+---
+
+# Next Steps
+
+After Keepalived setup:
+
+- Configure Nginx HA
+- Configure HAProxy load balancing
+- Configure database failover
+- Configure web application redundancy
+- Configure monitoring and alerting
+
+---
+
+# Author
+
+Abdul Rehan
+
+GitHub Repository:
+
+https://github.com/rehanadm/Linux-HA-Cluster

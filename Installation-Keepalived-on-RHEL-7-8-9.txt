@@ -1,0 +1,483 @@
+RHEL 7 / RHEL 8 / RHEL 9 KEEPALIVED CONFIGURATION GUIDE
+=======================================================
+
+This document provides a complete step-by-step guide to configure
+High Availability using Keepalived and Virtual IP (VIP) failover on:
+
+- RHEL 7
+- RHEL 8
+- RHEL 9
+- CentOS
+- Rocky Linux
+- AlmaLinux
+- Oracle Linux
+
+The setup uses:
+
+- Keepalived
+- VRRP (Virtual Router Redundancy Protocol)
+- Floating Virtual IP (VIP)
+
+This configuration provides automatic failover between two Linux servers.
+
+=======================================================
+WHAT IS KEEPALIVED?
+=======================================================
+
+Keepalived is a Linux service that provides:
+
+- High Availability (HA)
+- Virtual IP failover
+- Health checking
+- Automatic failover
+
+It works using VRRP protocol to move a Virtual IP address
+between servers during failure.
+
+=======================================================
+ARCHITECTURE OVERVIEW
+=======================================================
+
+                   CLIENT ACCESS
+                         |
+                         |
+                  Virtual IP (VIP)
+                    192.168.29.200
+                         |
+          ---------------------------------
+          |                               |
++-------------------+         +-------------------+
+|   MASTER NODE     |         |   BACKUP NODE     |
+|   rhcl-node1      |         |   rhcl-node2      |
+| 192.168.29.79     |         | 192.168.29.131    |
++-------------------+         +-------------------+
+
+Priority : 101                Priority : 100
+State    : MASTER             State    : BACKUP
+
+=======================================================
+LAB ENVIRONMENT
+=======================================================
+
+Node1    : rhcl-node1    : 192.168.29.79   : MASTER
+Node2    : rhcl-node2    : 192.168.29.131  : BACKUP
+VIP      : 192.168.29.200                  : Floating IP
+
+=======================================================
+PREREQUISITES
+=======================================================
+
+- Two Linux servers
+- Root or sudo access
+- Network connectivity
+- Same subnet for both nodes
+- Firewall access
+- SELinux configured properly
+
+=======================================================
+STEP 1 : CONFIGURE HOSTNAME
+=======================================================
+
+Configure hostname on Node1:
+
+# hostnamectl set-hostname rhcl-node1
+
+-------------------------------------------------------
+
+Configure hostname on Node2:
+
+# hostnamectl set-hostname rhcl-node2
+
+Verify:
+
+# hostnamectl
+
+=======================================================
+STEP 2 : CONFIGURE HOST RESOLUTION
+=======================================================
+
+Update /etc/hosts on BOTH nodes:
+
+# vi /etc/hosts
+
+Add:
+
+192.168.29.79   rhcl-node1.localdomain   rhcl-node1
+192.168.29.131  rhcl-node2.localdomain   rhcl-node2
+
+=======================================================
+STEP 3 : VERIFY CONNECTIVITY
+=======================================================
+
+From Node1:
+
+# ping rhcl-node2
+
+From Node2:
+
+# ping rhcl-node1
+
+=======================================================
+STEP 4 : INSTALL KEEPALIVED
+=======================================================
+
+RHEL 7:
+
+# yum install keepalived -y
+
+-------------------------------------------------------
+
+RHEL 8 / RHEL 9:
+
+# dnf install keepalived -y
+
+=======================================================
+STEP 5 : BACKUP EXISTING CONFIGURATION
+=======================================================
+
+Run on BOTH nodes:
+
+# cp /etc/keepalived/keepalived.conf \
+/etc/keepalived/keepalived.conf.bkp
+
+=======================================================
+STEP 6 : CONFIGURE MASTER NODE
+=======================================================
+
+Edit configuration on Node1:
+
+# vi /etc/keepalived/keepalived.conf
+
+Add below configuration:
+
+-------------------------------------------------------
+
+global_defs {
+   router_id RHCL_NODE1
+}
+
+vrrp_instance VI_1 {
+
+    state MASTER
+    interface enp0s3
+    virtual_router_id 51
+    priority 101
+    advert_int 1
+
+    authentication {
+        auth_type PASS
+        auth_pass MySecret123
+    }
+
+    virtual_ipaddress {
+        192.168.29.200
+    }
+}
+
+-------------------------------------------------------
+
+=======================================================
+CONFIGURATION EXPLANATION
+=======================================================
+
+state MASTER        : Primary node
+interface           : Network interface
+virtual_router_id   : Unique VRRP group ID
+priority            : Higher value becomes MASTER
+advert_int          : Advertisement interval
+auth_pass           : Authentication password
+virtual_ipaddress   : Floating VIP
+
+=======================================================
+STEP 7 : CONFIGURE BACKUP NODE
+=======================================================
+
+Edit configuration on Node2:
+
+# vi /etc/keepalived/keepalived.conf
+
+Add below configuration:
+
+-------------------------------------------------------
+
+global_defs {
+   router_id RHCL_NODE2
+}
+
+vrrp_instance VI_1 {
+
+    state BACKUP
+    interface enp0s3
+    virtual_router_id 51
+    priority 100
+    advert_int 1
+
+    authentication {
+        auth_type PASS
+        auth_pass MySecret123
+    }
+
+    virtual_ipaddress {
+        192.168.29.200
+    }
+}
+
+-------------------------------------------------------
+
+=======================================================
+STEP 8 : VERIFY NETWORK INTERFACE NAME
+=======================================================
+
+Check interface name before configuration:
+
+# ip addr
+
+Common interface names:
+
+eth0
+ens33
+enp0s3
+ens160
+
+Update interface parameter accordingly.
+
+=======================================================
+STEP 9 : CONFIGURE FIREWALL
+=======================================================
+
+Allow VRRP protocol:
+
+# firewall-cmd --permanent \
+--add-rich-rule='rule protocol value="vrrp" accept'
+
+# firewall-cmd --reload
+
+Verify:
+
+# firewall-cmd --list-all
+
+=======================================================
+STEP 10 : START KEEPALIVED SERVICE
+=======================================================
+
+Run on BOTH nodes:
+
+# systemctl enable keepalived
+# systemctl start keepalived
+# systemctl status keepalived
+
+=======================================================
+STEP 11 : VERIFY VIP ASSIGNMENT
+=======================================================
+
+Check VIP on MASTER node:
+
+# ip addr
+
+Expected output:
+
+192.168.29.200
+
+VIP should appear only on MASTER node.
+
+=======================================================
+STEP 12 : VERIFY KEEPALIVED LOGS
+=======================================================
+
+Check logs:
+
+# journalctl -u keepalived
+
+OR
+
+# tail -f /var/log/messages
+
+=======================================================
+STEP 13 : TEST FAILOVER
+=======================================================
+
+Stop Keepalived on MASTER node:
+
+# systemctl stop keepalived
+
+Verify VIP moved to BACKUP node:
+
+# ip addr
+
+Expected:
+
+- VIP removed from MASTER
+- VIP assigned to BACKUP
+
+=======================================================
+STEP 14 : RESTORE MASTER NODE
+=======================================================
+
+Start Keepalived again:
+
+# systemctl start keepalived
+
+Because MASTER has higher priority,
+VIP returns automatically.
+
+=======================================================
+KEEPALIVED SERVICE COMMANDS
+=======================================================
+
+Start service:
+
+# systemctl start keepalived
+
+-------------------------------------------------------
+
+Stop service:
+
+# systemctl stop keepalived
+
+-------------------------------------------------------
+
+Restart service:
+
+# systemctl restart keepalived
+
+-------------------------------------------------------
+
+Enable at boot:
+
+# systemctl enable keepalived
+
+-------------------------------------------------------
+
+Check status:
+
+# systemctl status keepalived
+
+=======================================================
+USEFUL VERIFICATION COMMANDS
+=======================================================
+
+Verify VIP:
+
+# ip addr
+
+-------------------------------------------------------
+
+Verify routing:
+
+# ip route
+
+-------------------------------------------------------
+
+Verify listening services:
+
+# ss -tulpn
+
+-------------------------------------------------------
+
+Check logs:
+
+# journalctl -xe
+
+=======================================================
+KEEPALIVED CONFIGURATION PARAMETERS
+=======================================================
+
+state               : MASTER or BACKUP
+interface           : Network interface
+virtual_router_id   : VRRP group ID
+priority            : Node priority
+advert_int          : Advertisement interval
+authentication      : VRRP authentication
+virtual_ipaddress   : Floating VIP
+
+=======================================================
+COMMON TROUBLESHOOTING
+=======================================================
+
+VIP not moving:
+
+# systemctl status keepalived
+
+Verify firewall rules.
+
+-------------------------------------------------------
+
+Incorrect interface:
+
+# ip addr
+
+Update interface name correctly.
+
+-------------------------------------------------------
+
+Authentication mismatch:
+
+Ensure BOTH nodes use same:
+
+auth_pass
+
+-------------------------------------------------------
+
+VRRP blocked by firewall:
+
+# firewall-cmd --permanent \
+--add-rich-rule='rule protocol value="vrrp" accept'
+
+# firewall-cmd --reload
+
+=======================================================
+SECURITY RECOMMENDATIONS
+=======================================================
+
+- Use strong authentication password
+- Restrict firewall access
+- Use dedicated HA network
+- Monitor keepalived logs
+- Configure application health checks
+
+=======================================================
+ADVANCED CONFIGURATION (OPTIONAL)
+=======================================================
+
+Keepalived can also monitor:
+
+- Apache
+- Nginx
+- MySQL
+- HAProxy
+- Custom scripts
+
+Example:
+
+track_script {
+    chk_httpd
+}
+
+=======================================================
+PRODUCTION RECOMMENDATIONS
+=======================================================
+
+- Use minimum 3 nodes for enterprise HA
+- Configure monitoring tools
+- Use redundant network paths
+- Implement fencing if required
+- Configure SELinux policies properly
+
+=======================================================
+NEXT STEPS
+=======================================================
+
+- Configure HAProxy
+- Configure Nginx failover
+- Configure database failover
+- Configure load balancing
+- Configure health-check scripts
+
+=======================================================
+AUTHOR
+=======================================================
+
+Abdul Rehan
+
+GitHub Repository:
+https://github.com/rehanadm/Linux-HA-Cluster

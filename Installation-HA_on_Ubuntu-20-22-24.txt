@@ -1,0 +1,517 @@
+# Ubuntu High Availability Cluster Setup using PCS and Pacemaker
+
+This document provides a complete step-by-step guide to configure a High Availability (HA) Cluster on Ubuntu servers using:
+
+- PCS (Pacemaker Configuration System)
+- Pacemaker
+- Corosync
+- Resource Agents
+
+Supported Ubuntu Versions:
+
+- Ubuntu 20.04 LTS
+- Ubuntu 22.04 LTS
+- Ubuntu 24.04 LTS
+
+This setup provides:
+
+- High Availability
+- Automatic failover
+- Cluster resource management
+- Service redundancy
+
+---
+
+# Cluster Components Overview
+
+| Component | Purpose |
+|---|---|
+| PCS | Cluster management utility |
+| Pacemaker | Resource management engine |
+| Corosync | Cluster communication layer |
+| PCSD | Web-based cluster management |
+| Resource Agents | Resource monitoring and failover |
+
+---
+
+# Architecture Overview
+
+```text
+                 HIGH AVAILABILITY CLUSTER
+
++-------------------+         Cluster Communication         +-------------------+
+|   ubuntu-node1    | <----------------------------------> |   ubuntu-node2    |
+| 192.168.29.101    |                                      | 192.168.29.102    |
++-------------------+                                      +-------------------+
+
+          Corosync + Pacemaker + PCS + Cluster Resources
+```
+
+---
+
+# Lab Environment
+
+| Node | Hostname | IP Address |
+|---|---|---|
+| Node1 | ubuntu-node1 | 192.168.29.101 |
+| Node2 | ubuntu-node2 | 192.168.29.102 |
+
+---
+
+# Prerequisites
+
+- Two Ubuntu servers
+- Root or sudo access
+- Minimum 2 GB RAM
+- Network connectivity between nodes
+- Static IP addresses configured
+- Firewall access enabled
+
+---
+
+# Step 1 : Configure Hostname
+
+## Configure Node1
+
+```bash
+sudo hostnamectl set-hostname ubuntu-node1
+```
+
+---
+
+## Configure Node2
+
+```bash
+sudo hostnamectl set-hostname ubuntu-node2
+```
+
+Verify:
+
+```bash
+hostnamectl
+```
+
+---
+
+# Step 2 : Configure Host Resolution
+
+Update `/etc/hosts` on BOTH nodes.
+
+```bash
+sudo vi /etc/hosts
+```
+
+Add:
+
+```text
+192.168.29.101   ubuntu-node1
+192.168.29.102   ubuntu-node2
+```
+
+---
+
+# Step 3 : Verify Connectivity
+
+From Node1:
+
+```bash
+ping ubuntu-node2
+```
+
+From Node2:
+
+```bash
+ping ubuntu-node1
+```
+
+---
+
+# Step 4 : Update Ubuntu Packages
+
+Run on BOTH nodes.
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+```
+
+---
+
+# Step 5 : Install HA Cluster Packages
+
+Install required packages on BOTH nodes.
+
+```bash
+sudo apt install pcs pacemaker corosync crmsh resource-agents -y
+```
+
+---
+
+# Step 6 : Set Password for hacluster User
+
+The `hacluster` user is used for cluster authentication.
+
+Set password on BOTH nodes.
+
+```bash
+sudo passwd hacluster
+```
+
+Use SAME password on both servers.
+
+---
+
+# Step 7 : Enable and Start PCS Service
+
+Run on BOTH nodes.
+
+```bash
+sudo systemctl enable pcsd
+sudo systemctl start pcsd
+sudo systemctl status pcsd
+```
+
+---
+
+# Step 8 : Configure Firewall
+
+If UFW firewall is enabled, allow cluster services.
+
+Check firewall status:
+
+```bash
+sudo ufw status
+```
+
+Allow cluster ports:
+
+```bash
+sudo ufw allow 2224/tcp
+sudo ufw allow 3121/tcp
+sudo ufw allow 5405/udp
+```
+
+Reload firewall:
+
+```bash
+sudo ufw reload
+```
+
+---
+
+# Step 9 : Authenticate Cluster Nodes
+
+Run from any one node.
+
+```bash
+sudo pcs host auth ubuntu-node1 ubuntu-node2 -u hacluster
+```
+
+Enter password when prompted.
+
+Expected output:
+
+```text
+ubuntu-node1: Authorized
+ubuntu-node2: Authorized
+```
+
+---
+
+# Step 10 : Create Cluster
+
+Create cluster named `UbuntuCluster`.
+
+```bash
+sudo pcs cluster setup UbuntuCluster ubuntu-node1 ubuntu-node2
+```
+
+---
+
+# Step 11 : Start Cluster
+
+Start cluster services on both nodes.
+
+```bash
+sudo pcs cluster start --all
+```
+
+Enable cluster services at boot.
+
+```bash
+sudo pcs cluster enable --all
+```
+
+---
+
+# Step 12 : Verify Cluster Status
+
+Check cluster status.
+
+```bash
+sudo pcs status
+```
+
+Expected output:
+
+```text
+Cluster name: UbuntuCluster
+Cluster Summary:
+  * Stack: corosync
+  * Current DC: ubuntu-node1
+  * 2 nodes configured
+```
+
+---
+
+# Step 13 : Verify Cluster Services
+
+Check Corosync service.
+
+```bash
+sudo systemctl status corosync
+```
+
+Check Pacemaker service.
+
+```bash
+sudo systemctl status pacemaker
+```
+
+---
+
+# Step 14 : Check Cluster Quorum
+
+```bash
+sudo pcs quorum status
+```
+
+---
+
+# Step 15 : View Cluster Configuration
+
+```bash
+sudo pcs config
+```
+
+---
+
+# Step 16 : Access PCS Web Interface
+
+Access PCS web interface from browser.
+
+```text
+https://<node-ip>:2224
+```
+
+Examples:
+
+```text
+https://192.168.29.101:2224
+https://192.168.29.102:2224
+```
+
+Login using:
+
+```text
+Username : hacluster
+Password : <configured-password>
+```
+
+---
+
+# Creating Cluster Resources
+
+Example: Create Virtual IP resource.
+
+```bash
+sudo pcs resource create ClusterVIP ocf:heartbeat:IPaddr2 \
+ip=192.168.29.200 cidr_netmask=24 op monitor interval=30s
+```
+
+Verify:
+
+```bash
+sudo pcs status
+```
+
+---
+
+# Useful PCS Commands
+
+## Check Cluster Status
+
+```bash
+sudo pcs status
+```
+
+---
+
+## View Cluster Configuration
+
+```bash
+sudo pcs config
+```
+
+---
+
+## Start Cluster
+
+```bash
+sudo pcs cluster start --all
+```
+
+---
+
+## Stop Cluster
+
+```bash
+sudo pcs cluster stop --all
+```
+
+---
+
+## Restart Cluster
+
+```bash
+sudo pcs cluster restart --all
+```
+
+---
+
+## Check Cluster Nodes
+
+```bash
+sudo pcs cluster status nodes
+```
+
+---
+
+## Monitor Cluster Resources
+
+```bash
+sudo crm_mon
+```
+
+---
+
+# Cluster Service Ports
+
+| Service | Port |
+|---|---|
+| PCS Web UI | 2224 |
+| Corosync | 5405/UDP |
+| Pacemaker Remote | 3121 |
+
+---
+
+# Common Troubleshooting
+
+## Check PCS Logs
+
+```bash
+sudo journalctl -u pcsd
+```
+
+---
+
+## Check Corosync Logs
+
+```bash
+sudo journalctl -u corosync
+```
+
+---
+
+## Check Pacemaker Logs
+
+```bash
+sudo journalctl -u pacemaker
+```
+
+---
+
+## Restart Cluster Services
+
+```bash
+sudo systemctl restart pcsd
+sudo systemctl restart corosync
+sudo systemctl restart pacemaker
+```
+
+---
+
+## Verify Hostname Resolution
+
+```bash
+ping ubuntu-node1
+ping ubuntu-node2
+```
+
+---
+
+## Verify Open Ports
+
+```bash
+ss -tulpn
+```
+
+---
+
+# Security Recommendations
+
+- Use dedicated HA network
+- Configure fencing (STONITH) in production
+- Restrict PCS web access
+- Enable firewall rules properly
+- Configure monitoring and alerting
+- Use secure passwords
+
+---
+
+# Advanced Configuration
+
+You can further configure:
+
+- Virtual IP failover
+- Nginx HA
+- Apache HA
+- MySQL/PostgreSQL HA
+- Shared storage
+- Fencing devices
+- Resource constraints
+- Resource groups
+
+---
+
+# Production Recommendations
+
+- Use minimum 3 nodes for enterprise clusters
+- Configure quorum policies
+- Use redundant network interfaces
+- Configure monitoring solutions
+- Use backup and recovery strategies
+- Configure fencing devices
+
+---
+
+# Next Steps
+
+After cluster setup:
+
+- Configure virtual IP resources
+- Configure application failover
+- Configure load balancing
+- Configure shared storage
+- Configure resource constraints
+- Configure fencing
+
+---
+
+# Author
+
+Abdul Rehan
+
+GitHub Repository:
+
+https://github.com/rehanadm/Linux-HA-Cluster
